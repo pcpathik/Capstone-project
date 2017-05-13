@@ -1,0 +1,214 @@
+---
+title: 'Coursera Data Science Capstone: Milestone Report'
+author: "Pathik Chamaria"
+date: "May 13, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache=TRUE)
+library(readr)
+library(ggplot2)
+library(tokenizers)
+```
+
+## Synopsis
+
+This is the Milestone Report for the Coursera Data Science Capstone project. The goal of the capstone project is to create a predictive text model using a large text corpus of documents as training data. Natural language processing techniques will be used to perform the analysis and build the predictive model.
+
+This milestone report describes the major features of the training data with our exploratory data analysis and summarizes our plans for creating the predictive model.
+
+## Getting the data
+
+For the purpose of creating a predictive input model, we have been supplied with a dataset https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip, containing twitter, news and blog data for 4 languages.
+
+For this part we'll be solely focussing on the English corpus.
+
+```{r}
+files <- dir("en_US/")
+con <- file(paste("en_US/",files[1], sep = ""))
+blog <- read_lines(con,-1)
+con <- file(paste("en_US/",files[2], sep = ""))
+news <- read_lines(con,-1)
+con <- file(paste("en_US/",files[3], sep = ""))
+twitter <- read_lines(con,-1)
+
+```
+
+
+## Summary
+We examin the data sets and summarize our findings (file sizes, line counts, word counts) below.
+```{r}
+sum_table <- function(files){
+    df <- data.frame(file = files)
+    df$'size in mb' <-  round(file.size(paste("en_US/",files, sep = ""))/1024/1024,1)
+    df$'no. of lines' <- c(length(blog),length(news),length(twitter))
+    wordCount <- function(lns){
+        sum(sapply(gregexpr("\\S+", lns), length))
+    }
+    df$'no. of words' <- c(wordCount(blog),wordCount(news),wordCount(twitter))
+    df$'no. of char' <- c(sum(nchar(blog)),sum(nchar(news)),sum(nchar(twitter)))
+    df
+}
+
+sum_table(files)
+```
+
+As we can see all datasets differ in amount of lines, but in total each has roughly between 30-37M words.
+
+## Sampling
+
+Since the English language has between 2k and 5k most common used words (depending on which source you lookup), we probably won't need all 100M words to be analyzed. 
+
+There are ways to calculate the needed sample size, but they don't reaaly seem to apply to this problem, however.
+
+If we just take 10% of all datasets we still end up with 10M words to be analyzed.
+
+```{r}
+set.seed(123)
+
+blog <- blog[sample(1:length(blog), length(blog)*0.1)]
+news <- news[sample(1:length(news), length(news)*0.1)]
+twitter <- twitter[sample(1:length(twitter), length(twitter)*0.1)]
+
+data <- c(blog,news,twitter)
+
+```
+
+
+## Cleaning The Data
+Before going ahead, we must clean the data first. This involves removing URLs and UTF chars. Also the text converted to lower case.
+
+```{r}
+clean_data <- gsub("(f|ht)tp(s?)://(.*)[.][a-z]+", " ",data)
+
+clean_data <- enc2native(clean_data)
+
+clean_data <- tolower(clean_data)
+
+clean_data <- gsub("(<u[\\+].{4}>)", " ", clean_data)
+
+
+```
+
+
+## Tokenization
+To actually parse the word's we are going to use a **whitespace tokenizer**.
+First we'll split each line into sentences, because the end of a sentence should probably not be a predictor for the next one. This way we'll keep tokization independant of context.
+Then we'll remove all non word chars and split on whitespace. We also expand some of the most common abbreavations in the data.
+
+
+```{r}
+
+sent <- strsplit(clean_data, "[\\.\\,!\\?\\:]+")
+
+sent <- unlist(sent)
+
+clean_sent <- gsub("[[:space:]]+", " ", trimws(gsub("[^[:lower:]]", " ",sent)))
+
+clean_sent <- gsub("don t", "do not", clean_sent)
+clean_sent <- gsub("it s", "it is", clean_sent)
+clean_sent <- gsub("i m", "i am", clean_sent)
+clean_sent <- gsub("can t", "can not", clean_sent)
+clean_sent <- gsub("didn t", "did not", clean_sent)
+clean_sent <- gsub("i ve", "i have", clean_sent)
+clean_sent <- gsub("you re", "you are", clean_sent)
+clean_sent <- gsub("that s", "that is", clean_sent)
+clean_sent <- gsub("he s", "he is", clean_sent)
+clean_sent <- gsub("i ll", "i will", clean_sent)
+clean_sent <- gsub("doesn t", "does not", clean_sent)
+clean_sent <- gsub("wouldn t", "would not", clean_sent)
+clean_sent <- gsub("we re", "we are", clean_sent)
+clean_sent <- gsub("there s", "there is", clean_sent)
+clean_sent <- gsub("isn t", "is not", clean_sent)
+clean_sent <- gsub("i d", "i would", clean_sent)
+clean_sent <- gsub("world s", "world is", clean_sent)
+clean_sent <- gsub("company s", "company is", clean_sent)
+clean_sent <- gsub("what s", "what is", clean_sent)
+clean_sent <- gsub("haven t", "have not", clean_sent)
+```
+
+Next, we will remove some the sentences which are blank. We also perform the tokenization to have a list of term vectors
+
+```{r}
+blank <- clean_sent == ""
+
+clean_sent <- clean_sent[!blank]
+
+sent_words <- strsplit(clean_sent, " ")
+
+```
+
+## Explore
+
+### 1. View data
+Now we have a sample tokenize dataset.
+Let's explore
+
+```{r}
+head(sent_words, 3)
+
+#Num lines
+length(sent_words)
+
+#Num terms
+sum(sapply(sent_words, length))
+```
+
+We ended up with almost 10M terms divided over >1.3M sentences (term vectors)
+
+### 2. Term frequencies
+
+we can see what are the most common words in our dataset.
+
+```{r, echo=FALSE}
+plot <- function(tab,x){
+    tabp <-  tab[order(tab$Freq,decreasing = T),]
+    tabp <- tabp[1:x,]
+    names(tabp) <- c("words", "freq")
+
+    ggplot(tabp) + geom_bar(aes(reorder(words,freq), freq),stat = "identity") + coord_flip()
+
+
+}
+
+```
+
+
+```{r}
+words <- unlist(sent_words)
+tab <- table(words)
+tab <- as.data.frame(tab)
+plot(tab,25)
+```
+
+### 3. Create n-grams
+
+Now we have term vectors, we can now create n-grams
+
+```{r}
+bigram <- tokenize_ngrams(clean_sent, n = 2)
+bigram_tokens <- unlist(bigram)
+tab2 <- as.data.frame(table(bigram_tokens))
+plot(tab2,25)
+
+
+trigram <- tokenize_ngrams(clean_sent, n = 3)
+trigram_tokens <- unlist(trigram)
+tab3 <- as.data.frame(table(trigram_tokens))
+plot(tab3,25)
+```
+
+# Next Step
+
+## 1. Prediction
+
+We see that small parts of the data are responsible for the bulk of the corpus. This allows prediction to be a smaller model to just focus on the most important parts.
+
+
+## 2. Next steps
+
+* Reevaluate approach and see if sample size adjust,inclusion of stopwords, punctuation, numbers, etc improve prediction
+* Building a predictive model using the identified tokens
+* Wrapping up the results and the developed model as a data product, shiny app.
